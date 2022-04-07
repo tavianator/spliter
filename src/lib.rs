@@ -16,7 +16,7 @@
 
 use rayon::iter::plumbing::{Folder, Reducer, UnindexedConsumer};
 use rayon::iter::ParallelIterator;
-use rayon::join;
+use rayon::{current_num_threads, join_context};
 
 /// An iterator that can be split.
 pub trait Spliterator: Iterator + Sized {
@@ -45,22 +45,41 @@ where
 pub struct ParSpliter<T> {
     /// The underlying Spliterator.
     iter: T,
+    /// The number of pieces we'd like to split into.
+    splits: usize,
 }
 
 impl<T: Spliterator> ParSpliter<T> {
     fn new(iter: T) -> Self {
-        Self { iter }
+        Self {
+            iter,
+            splits: current_num_threads(),
+        }
     }
 
-    fn split(&mut self) -> Option<Self> {
+    fn split(&mut self, stolen: bool) -> Option<Self> {
+        // Thief-splitting: start with enough splits to fill the thread pool,
+        // and reset every time a job is stolen by another thread.
+        if stolen {
+            self.splits = current_num_threads();
+        }
+
+        if self.splits == 0 {
+            return None;
+        }
+
         if let Some(split) = self.iter.split() {
-            Some(Self { iter: split })
+            self.splits /= 2;
+            Some(Self {
+                iter: split,
+                splits: self.splits,
+            })
         } else {
             None
         }
     }
 
-    fn bridge<C>(&mut self, consumer: C) -> C::Result
+    fn bridge<C>(&mut self, stolen: bool, consumer: C) -> C::Result
     where
         T: Send,
         C: UnindexedConsumer<T::Item>,
@@ -69,11 +88,14 @@ impl<T: Spliterator> ParSpliter<T> {
 
         while !folder.full() {
             // Try to split
-            if let Some(mut split) = self.split() {
+            if let Some(mut split) = self.split(stolen) {
                 let (r1, r2) = (consumer.to_reducer(), consumer.to_reducer());
                 let left_consumer = consumer.split_off_left();
 
-                let (left, right) = join(|| self.bridge(left_consumer), || split.bridge(consumer));
+                let (left, right) = join_context(
+                    |ctx| self.bridge(ctx.migrated(), left_consumer),
+                    |ctx| split.bridge(ctx.migrated(), consumer),
+                );
                 return r1.reduce(folder.complete(), r2.reduce(left, right));
             }
 
@@ -100,7 +122,7 @@ where
     where
         C: UnindexedConsumer<Self::Item>,
     {
-        self.bridge(consumer)
+        self.bridge(false, consumer)
     }
 }
 
