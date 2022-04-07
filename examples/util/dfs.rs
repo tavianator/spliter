@@ -67,6 +67,18 @@ impl DepthFirstSearch {
             stack: vec![cube.into()],
         }
     }
+
+    /// Split this traversal in half if possible.
+    #[allow(dead_code)]
+    pub fn try_split(&mut self) -> Option<Self> {
+        let len = self.stack.len();
+        if len >= 2 {
+            let stack = self.stack.split_off(len / 2);
+            Some(Self { stack })
+        } else {
+            None
+        }
+    }
 }
 
 impl Iterator for DepthFirstSearch {
