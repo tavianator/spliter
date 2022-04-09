@@ -57,6 +57,10 @@ impl From<PocketCube> for Node {
 
 /// A depth-first traversal of the Rubik's cube graph.
 pub struct DepthFirstSearch {
+    // Parent has not yet been yielded, but has had it's children expanded into stack.  This is an
+    // implementation detail of `try_split` allowing us to expand children without having to yield
+    // immediately:
+    parent: Option<Node>,
     stack: Vec<Node>,
 }
 
@@ -64,6 +68,7 @@ impl DepthFirstSearch {
     /// Create a new search with the given starting point.
     pub fn new(cube: PocketCube) -> Self {
         Self {
+            parent: None,
             stack: vec![cube.into()],
         }
     }
@@ -71,14 +76,20 @@ impl DepthFirstSearch {
     /// Split this traversal in half if possible.
     #[allow(dead_code)]
     pub fn try_split(&mut self) -> Option<Self> {
-        let len = self.stack.len();
+        if self.parent.is_none() && self.stack.len() == 1 {
+            let parent = self.stack.pop().unwrap();
+            self.stack.extend(parent.children());
+            self.parent = Some(parent);
+        }
+
+        let len : usize = self.stack.len() + self.parent.is_some() as usize;
         if len >= 2 {
             // It's a stack (LIFO), so the bits at the end come before the bits at the beginning.
             // To maintain this reversed ordering we give away the bits from the beginning and
             // keep the bits from the end:
             let mut stack = self.stack.split_off(len / 2);
             std::mem::swap(&mut stack, &mut self.stack);
-            Some(Self { stack })
+            Some(Self { parent: None, stack })
         } else {
             None
         }
@@ -89,7 +100,9 @@ impl Iterator for DepthFirstSearch {
     type Item = PocketCube;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(node) = self.stack.pop() {
+        if let Some(node) = self.parent.take() {
+            Some(node.cube)
+        } else if let Some(node) = self.stack.pop() {
             self.stack.extend(node.children());
             Some(node.cube)
         } else {
