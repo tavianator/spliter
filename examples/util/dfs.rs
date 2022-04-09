@@ -73,7 +73,11 @@ impl DepthFirstSearch {
     pub fn try_split(&mut self) -> Option<Self> {
         let len = self.stack.len();
         if len >= 2 {
-            let stack = self.stack.split_off(len / 2);
+            // It's a stack (LIFO), so the bits at the end come before the bits at the beginning.
+            // To maintain this reversed ordering we give away the bits from the beginning and
+            // keep the bits from the end:
+            let mut stack = self.stack.split_off(len / 2);
+            std::mem::swap(&mut stack, &mut self.stack);
             Some(Self { stack })
         } else {
             None
