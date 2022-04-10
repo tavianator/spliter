@@ -57,13 +57,7 @@ impl<T: Spliterator> ParSpliter<T> {
         }
     }
 
-    fn split(&mut self, stolen: bool) -> Option<Self> {
-        // Thief-splitting: start with enough splits to fill the thread pool,
-        // and reset every time a job is stolen by another thread.
-        if stolen {
-            self.splits = current_num_threads();
-        }
-
+    fn split(&mut self) -> Option<Self> {
         if self.splits == 0 {
             return None;
         }
@@ -84,11 +78,21 @@ impl<T: Spliterator> ParSpliter<T> {
         T: Send,
         C: UnindexedConsumer<T::Item>,
     {
+        // Thief-splitting: start with enough splits to fill the thread pool,
+        // and reset every time a job is stolen by another thread.
+        if stolen {
+            self.splits = current_num_threads();
+        }
+
         let mut folder = consumer.split_off_left().into_folder();
+
+        if self.splits == 0 {
+            return folder.consume_iter(&mut self.iter).complete();
+        }
 
         while !folder.full() {
             // Try to split
-            if let Some(mut split) = self.split(stolen) {
+            if let Some(mut split) = self.split() {
                 let (r1, r2) = (consumer.to_reducer(), consumer.to_reducer());
                 let left_consumer = consumer.split_off_left();
 
